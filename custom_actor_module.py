@@ -210,7 +210,7 @@ class IQN(nn.Module):
         self.input_shape = 137
         self.action_size = 12
         self.K = 32
-        self.N = 8
+        self.N = 32
         self.n_cos = 64
         self.layer_size = 256
         self.pis = torch.FloatTensor([np.pi * i for i in range(self.n_cos)]).view(
@@ -224,7 +224,7 @@ class IQN(nn.Module):
         self.cnn = VanillaCNN()
         #weight_init([self.head_1, self.ff_1])
 
-    def calc_cos(self, batch_size, n_tau=8):
+    def calc_cos(self, batch_size, n_tau=32):
         """
         Calculating the cosinus values depending on the number of tau samples
         """
@@ -236,7 +236,7 @@ class IQN(nn.Module):
             batch_size, n_tau, self.n_cos), "cos shape is incorrect"
         return cos, taus
 
-    def forward(self, input, num_tau=8):
+    def forward(self, input, num_tau=32):
 
         speed, gear, rpm, images, act1, act2 = input
 
@@ -309,6 +309,7 @@ class MyActorModule(TorchActorModule):
         # Our hybrid CNN+MLP policy:
         self.net = IQN()
         self.actions = np.array([[[x, y, z]] for x in [0, 1] for y in [0, 1] for z in [-1, 0, 1]])
+        self.eps = 1.0
 
     def save(self, path):
 
@@ -332,8 +333,11 @@ class MyActorModule(TorchActorModule):
     def act(self, obs, test=False):
         with torch.no_grad():
             action_values = self.net.get_action(obs)
-            action = np.argmax(action_values.cpu().data.numpy())
-            a = self.actions[action]
+            if random.random() > self.eps:
+                action = np.argmax(action_values.cpu().data.numpy())
+                a = self.actions[action]
+            else:
+                a = self.actions[random.randint(0, len(self.actions) - 1)]
             # a = a / np.sum(np.abs(a))
             a = a.squeeze(0)
             return a
@@ -408,7 +412,7 @@ class DQN_Agent(TrainingAgent):
         loss = torch.where(td_errors.abs() <= k, 0.5 *
                            td_errors.pow(2), k * (td_errors.abs() - 0.5 * k))
         assert loss.shape == (
-            td_errors.shape[0], 8, 8), "huber loss has wrong shape"
+            td_errors.shape[0], 32, 32), "huber loss has wrong shape"
         return loss
 
     def get_index(self, row, lookup):
@@ -419,6 +423,9 @@ class DQN_Agent(TrainingAgent):
 
 
     def train(self, experiences):
+
+        self.qnetwork_local.eps *= 0.9
+        self.qnetwork_target.eps *= 0.9
 
         self.optimizer.zero_grad()
         states, actions, rewards, next_states, dones, _ = experiences
@@ -437,16 +444,15 @@ class DQN_Agent(TrainingAgent):
         # Get expected Q values from local model
         Q_expected, taus = self.qnetwork_local(states)
         Q_expected = Q_expected.gather(
-            2, actions_.unsqueeze(-1).expand(self.BATCH_SIZE, 8, 1))
+            2, actions_.unsqueeze(-1).expand(self.BATCH_SIZE, 32, 1))
 
         # Quantile Huber loss
         td_error = Q_targets - Q_expected
         assert td_error.shape == (
-            self.BATCH_SIZE, 8, 8), "wrong td error shape"
+            self.BATCH_SIZE, 32, 32), "wrong td error shape"
         huber_l = self.calculate_huber_loss(td_error, 1.0)
         quantil_l = abs(taus - (td_error.detach() < 0).float()) * huber_l / 1.0
 
-        # , keepdim=True if per weights get multipl
         loss = quantil_l.sum(dim=1).mean(dim=1)
         loss = loss.mean()
 
