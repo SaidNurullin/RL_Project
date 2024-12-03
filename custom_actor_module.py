@@ -125,6 +125,8 @@ imgs_buf_len = cfg.IMG_HIST_LEN
 act_buf_len = cfg.ACT_BUF_LEN
 
 
+
+
 memory_cls = partial(memory_base_cls,
                      memory_size=memory_size,
                      batch_size=batch_size,
@@ -309,7 +311,7 @@ class MyActorModule(TorchActorModule):
         # Our hybrid CNN+MLP policy:
         self.net = IQN()
         self.actions = np.array([[[x, y, z]] for x in [0, 1] for y in [0, 1] for z in [-1, 0, 1]])
-        self.eps = 1.0
+        self.eps = 1
 
     def save(self, path):
 
@@ -332,10 +334,12 @@ class MyActorModule(TorchActorModule):
 
     def act(self, obs, test=False):
         with torch.no_grad():
+            self.eps *= 0.99999
             action_values = self.net.get_action(obs)
             if random.random() > self.eps:
                 action = np.argmax(action_values.cpu().data.numpy())
                 a = self.actions[action]
+                print(a)
             else:
                 a = self.actions[random.randint(0, len(self.actions) - 1)]
             # a = a / np.sum(np.abs(a))
@@ -424,8 +428,6 @@ class DQN_Agent(TrainingAgent):
 
     def train(self, experiences):
 
-        self.qnetwork_local.eps *= 0.9
-        self.qnetwork_target.eps *= 0.9
 
         self.optimizer.zero_grad()
         states, actions, rewards, next_states, dones, _ = experiences
